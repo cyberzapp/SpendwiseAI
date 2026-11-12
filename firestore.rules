@@ -1,0 +1,109 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Check if the user is a member of the workspace
+    function isWorkspaceMember(workspaceId) {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid));
+    }
+    
+    // Get workspace member role
+    function getMemberRole(workspaceId) {
+      return get(/databases/$(database)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid)).data.role;
+    }
+    
+    // Check if member has write permissions (owner, admin, or member)
+    function canWriteWorkspace(workspaceId) {
+      return isWorkspaceMember(workspaceId) && 
+        (getMemberRole(workspaceId) in ['owner', 'admin', 'member']);
+    }
+    
+    // Check if member is admin or owner
+    function isAdminOrOwner(workspaceId) {
+      return isWorkspaceMember(workspaceId) && 
+        (getMemberRole(workspaceId) in ['owner', 'admin']);
+    }
+
+    // User profile collection
+    match /users/{userId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Workspaces collection
+    match /workspaces/{workspaceId} {
+      allow read: if isWorkspaceMember(workspaceId);
+      allow create: if isAuthenticated() && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && 
+        (resource.data.ownerId == request.auth.uid || isAdminOrOwner(workspaceId));
+
+      // Members subcollection
+      match /members/{memberId} {
+        allow read: if isWorkspaceMember(workspaceId);
+        allow write: if isAdminOrOwner(workspaceId) || (isAuthenticated() && request.auth.uid == memberId);
+      }
+
+      // Accounts subcollection
+      match /accounts/{accountId} {
+        allow read: if isWorkspaceMember(workspaceId);
+        allow create, update, delete: if canWriteWorkspace(workspaceId);
+      }
+
+      // Transactions subcollection
+      match /transactions/{transactionId} {
+        allow read: if isWorkspaceMember(workspaceId);
+        allow create, update, delete: if canWriteWorkspace(workspaceId);
+      }
+
+      // Categories subcollection
+      match /categories/{categoryId} {
+        allow read: if isWorkspaceMember(workspaceId);
+        allow create, update, delete: if canWriteWorkspace(workspaceId);
+      }
+
+      // Budgets subcollection
+      match /budgets/{budgetId} {
+        allow read: if isWorkspaceMember(workspaceId);
+        allow create, update, delete: if canWriteWorkspace(workspaceId);
+      }
+
+      // Recurring transactions subcollection
+      match /recurringTransactions/{recurringId} {
+        allow read: if isWorkspaceMember(workspaceId);
+        allow create, update, delete: if canWriteWorkspace(workspaceId);
+      }
+
+      // Goals subcollection
+      match /goals/{goalId} {
+        allow read: if isWorkspaceMember(workspaceId);
+        allow create, update, delete: if canWriteWorkspace(workspaceId);
+      }
+
+      // Notifications subcollection
+      match /notifications/{notificationId} {
+        allow read, write: if isWorkspaceMember(workspaceId);
+      }
+
+      // Audit logs
+      match /auditLogs/{logId} {
+        allow read: if isAdminOrOwner(workspaceId);
+        allow create: if canWriteWorkspace(workspaceId);
+        allow update, delete: if false; // Immutable audit logs
+      }
+
+      // AI Conversations subcollection
+      match /aiConversations/{conversationId} {
+        allow read, write: if isWorkspaceMember(workspaceId);
+        
+        match /messages/{messageId} {
+          allow read, write: if isWorkspaceMember(workspaceId);
+        }
+      }
+    }
+  }
+}
